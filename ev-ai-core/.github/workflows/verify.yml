@@ -1,0 +1,48 @@
+name: Verify Integrity
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Verify integrity
+        run: |
+          python3 verify_integrity.py
+      
+      - name: Run tests
+        run: |
+          pip install -q aiohttp websockets pyyaml
+          python3 -c "
+            from memory import remember, recall
+            from tools import bash, hash
+            from skills import list_skills
+            from prompts import build_prompt
+            from proactive import analyze_and_act
+            from mcp import create_server
+            import asyncio
+            
+            # Quick validation
+            remember('test', 'value', 'test', 5)
+            assert recall('test') == 'value'
+            assert hash('test', 'md5') == '098f6bcd4621d373cade4e832627b4f6'
+            assert len(list_skills()) > 50
+            print('All quick tests passed')
+          "
+      
+      - name: Require approval for changes
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "⚠️ Manual review required for pull requests"
+          exit 1
