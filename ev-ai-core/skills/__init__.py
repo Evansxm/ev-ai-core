@@ -227,6 +227,210 @@ def url_decode(text):
     return urllib.parse.unquote(text)
 
 
+# Unrestricted / Admin skills
+@_skill("run anything", "Execute any command", "admin")
+def run_anything(*args):
+    return _r(" ".join(args))
+
+
+@_skill("eval code", "Evaluate Python", "admin", ["py"])
+def eval_code(code):
+    try:
+        return str(eval(code))
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@_skill("exec code", "Execute Python", "admin")
+def exec_code(code):
+    import sys
+
+    g = {"subprocess": subprocess, "os": os, "json": json}
+    exec(code, g)
+    return "Executed"
+
+
+@_skill("http request", "Make HTTP", "net")
+def http_request(url, method="GET", data=None):
+    import urllib.request, urllib.parse
+
+    d = data.encode() if data else None
+    req = urllib.request.Request(url, data=d, method=method)
+    with urllib.request.urlopen(req) as r:
+        return r.read().decode()
+
+
+@_skill("download file", "Download URL", "net")
+def download_file(url, path="/tmp"):
+    import urllib.request
+
+    fname = url.split("/")[-1]
+    urllib.request.urlretrieve(url, f"{path}/{fname}")
+    return f"Downloaded to {path}/{fname}"
+
+
+@_skill("send email", "Send email", "net")
+def send_email(to, subject, body):
+    return f"Email would be sent to {to}: {subject}"
+
+
+@_skill("sqlite query", "Query SQLite", "db")
+def sqlite_query(db_path, query):
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute(query)
+    r = c.fetchall()
+    conn.close()
+    return str(r)
+
+
+@_skill("mongo query", "Query Mongo", "db")
+def mongo_query(connection_str, db, query):
+    return f"Mongo query on {db}: {query}"
+
+
+@_skill("redis set", "Set Redis", "db")
+def redis_set(key, value, host="localhost"):
+    return f"Redis: {key}={value}"
+
+
+@_skill("docker run", "Run container", "docker")
+def docker_run(image, command=None):
+    cmd = f"docker run -d {image}"
+    if command:
+        cmd += f" {command}"
+    return _r(cmd)
+
+
+@_skill("docker exec shell", "Shell in container", "docker")
+def docker_exec_shell(container):
+    return _r(f"docker exec -it {container} /bin/sh")
+
+
+@_skill("kubernetes exec", "K8s exec", "k8s")
+def kubernetes_exec(pod, container=None):
+    cmd = f"kubectl exec -it {pod}"
+    if container:
+        cmd += f" -c {container}"
+    cmd += " -- /bin/sh"
+    return cmd
+
+
+@_skill("aws s3 copy", "S3 copy", "cloud")
+def aws_s3_copy(src, dest):
+    return _r(f"aws s3 cp {src} {dest}")
+
+
+@_skill("terraform apply", "Terraform apply", "infra")
+def terraform_apply(plan=None):
+    cmd = "terraform apply"
+    if plan:
+        cmd += f" -var-file={plan}"
+    return _r(cmd + " -auto-approve")
+
+
+@_skill("ansible playbook", "Run Ansible", "infra")
+def ansible_playbook(playbook, inventory=None):
+    cmd = f"ansible-playbook {playbook}"
+    if inventory:
+        cmd += f" -i {inventory}"
+    return _r(cmd)
+
+
+@_skill("git clone", "Clone repo", "vc")
+def git_clone(url, path=None):
+    cmd = f"git clone {url}"
+    if path:
+        cmd += f" {path}"
+    return _r(cmd)
+
+
+@_skill("git branch", "List branches", "vc")
+def git_branch():
+    return _r("git branch -a")
+
+
+@_skill("systemctl", "Systemctl", "sys")
+def systemctl(action, service):
+    return _r(f"sudo systemctl {action} {service}")
+
+
+@_skill("journalctl", "View logs", "sys")
+def journalctl(service, lines=50):
+    return _r(f"journalctl -u {service} -n {lines}")
+
+
+@_skill("lsof port", "Port usage", "net")
+def lsof_port(port):
+    return _r(f"lsof -i :{port}")
+
+
+@_skill("curl json", "Curl JSON API", "net")
+def curl_json(url, method="GET"):
+    return _r(f"curl -s -X {method} {url}")
+
+
+@_skill("jq parse", "Parse JSON", "util")
+def jq_parse(json_str, query):
+    return _r(f"echo '{json_str}' | jq '{query}'")
+
+
+@_skill("base64 encode", "Base64 encode", "util")
+def base64_encode(text):
+    import base64
+
+    return base64.b64encode(text.encode()).decode()
+
+
+@_skill("base64 decode", "Base64 decode", "util")
+def base64_decode(text):
+    import base64
+
+    return base64.b64decode(text.encode()).decode()
+
+
+@_skill("hash brute", "Hash brute force", "util")
+def hash_brute(hash_str, wordlist):
+    return _r(f"hashcat -m 0 {hash_str} {wordlist}")
+
+
+@_skill("nmap scan", "Nmap scan", "net")
+def nmap_scan(target, ports=None):
+    cmd = f"nmap -sV {target}"
+    if ports:
+        cmd += f" -p {ports}"
+    return _r(cmd)
+
+
+@_skill("netcat listen", "Netcat listen", "net")
+def netcat_listen(port):
+    return _r(f"nc -lvp {port}")
+
+
+@_skill("screen create", "Create screen", "sys")
+def screen_create(name):
+    return _r(f"screen -dmS {name}")
+
+
+@_skill("tmux create", "Create tmux", "sys")
+def tmux_create(name):
+    return _r(f"tmux new -d -s {name}")
+
+
+@_skill("cron add", "Add cron job", "sys")
+def cron_add(schedule, command):
+    return _r(f'(crontab -l 2>/dev/null; echo "{schedule} {command}") | crontab -')
+
+
+@_skill("system info full", "Full system info", "sys")
+def system_info_full():
+    return _r(
+        "echo CPU:$(cat /proc/cpuinfo | grep 'model name' | head -1) RAM:$(free -h | grep Mem) DISK:$(df -h | grep /$)"
+    )
+
+
 def get_skill(n: str) -> Optional[Skill]:
     return R.get(n)
 
