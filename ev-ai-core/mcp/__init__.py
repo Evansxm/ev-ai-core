@@ -22,6 +22,15 @@ class MCPBase:
     async def handle(self, m: str, params: Dict) -> Dict:
         return {}
 
+    def tool(self, n: str, d: str = "", s: Dict = None):
+        s = s or {}
+
+        def dec(f):
+            self.tools[n] = {"n": n, "d": d, "s": s, "f": f}
+            return f
+
+        return dec
+
     def _tool(self, n: str, d: str, s: Dict, f):
         self.tools[n] = {"n": n, "d": d, "s": s, "f": f}
         return f

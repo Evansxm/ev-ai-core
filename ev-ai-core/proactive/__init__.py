@@ -82,7 +82,7 @@ class PE:
                         a.lr = now
                     r.append(a)
                     break
-        r.sort(key=lambda x: x.p.value, reverse=True)
+        r.sort(key=lambda x: x.p.value if hasattr(x.p, "value") else x.p, reverse=True)
         return r
 
     def exec_act(self, acts: List[Action], ctx: Dict = None) -> List[Dict]:
