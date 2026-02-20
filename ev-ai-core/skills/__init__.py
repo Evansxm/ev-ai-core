@@ -1,425 +1,235 @@
-import click
-import asyncio
-import json
-import os
+# v2026-02-efficient-r1 - Skills CLI system
+import subprocess, json, os
 from typing import Any, Callable, Dict, List, Optional
-from pathlib import Path
 from dataclasses import dataclass, field
-from datetime import datetime
-import importlib.util
-import sys
 
 
 @dataclass
 class Skill:
     name: str
-    description: str
-    category: str
-    command: str
+    desc: str
+    cat: str
+    cmd: str
     handler: Callable
     aliases: List[str] = field(default_factory=list)
     hidden: bool = False
     enabled: bool = True
 
 
-class SkillRegistry:
+class S:
     def __init__(self):
         self.skills: Dict[str, Skill] = {}
-        self.categories: Dict[str, List[str]] = {}
+        self.cats: Dict[str, List[str]] = {}
 
-    def register(self, skill: Skill):
-        self.skills[skill.name] = skill
-        if skill.category not in self.categories:
-            self.categories[skill.category] = []
-        self.categories[skill.category].append(skill.name)
+    def reg(self, s: Skill):
+        self.skills[s.name] = s
+        self.cats.setdefault(s.cat, []).append(s.name)
 
-    def get(self, name: str) -> Optional[Skill]:
-        return self.skills.get(name)
+    def get(self, n: str) -> Optional[Skill]:
+        return self.skills.get(n)
 
-    def get_by_category(self, category: str) -> List[Skill]:
-        names = self.categories.get(category, [])
-        return [self.skills[n] for n in names]
+    def by_cat(self, c: str) -> List[Skill]:
+        return [self.skills[n] for n in self.cats.get(c, [])]
 
     def list_all(self) -> List[Dict]:
         return [
-            {
-                "name": s.name,
-                "description": s.description,
-                "category": s.category,
-                "aliases": s.aliases,
-                "enabled": s.enabled,
-            }
+            {"n": s.name, "d": s.desc, "c": s.cat, "a": s.aliases, "e": s.enabled}
             for s in self.skills.values()
             if not s.hidden
         ]
 
-    def enable(self, name: str):
-        if name in self.skills:
-            self.skills[name].enabled = True
+    def en(self, n: str):
+        if n in self.skills:
+            self.skills[n].enabled = True
 
-    def disable(self, name: str):
-        if name in self.skills:
-            self.skills[name].enabled = False
-
-
-skill_registry = SkillRegistry()
+    def dis(self, n: str):
+        if n in self.skills:
+            self.skills[n].enabled = False
 
 
-def skill(
-    name: str, description: str, category: str = "general", aliases: List[str] = None
-):
-    def decorator(func: Callable):
-        cmd_name = name.replace(" ", "-")
-        aliases = aliases or []
+R = S()
+_s = subprocess.run
 
-        skill_obj = Skill(
-            name=name,
-            description=description,
-            category=category,
-            command=cmd_name,
-            handler=func,
-            aliases=aliases,
+
+def _r(cmd: str) -> str:
+    return _s(cmd, shell=True, capture_output=True, text=True).stdout
+
+
+def _skill(name: str, desc: str, cat: str = "general", als: List[str] = None):
+    def dec(f: Callable):
+        cmd = name.replace(" ", "-")
+        R.reg(
+            Skill(name=name, desc=desc, cat=cat, cmd=cmd, handler=f, aliases=als or [])
         )
-        skill_registry.register(skill_obj)
+        return f
 
-        @click.command(name=cmd_name)
-        @click.pass_context
-        def cmd_wrapper(ctx, *args, **kwargs):
-            return func(*args, **kwargs)
-
-        for alias in aliases:
-
-            @click.command(name=alias)
-            @click.pass_context
-            def alias_cmd(ctx, *args, **kwargs):
-                return func(*args, **kwargs)
-
-        return func
-
-    return decorator
+    return dec
 
 
-def create_click_group(commands: List[Skill] = None):
-    @click.group()
-    def cli():
-        pass
-
-    commands = commands or list(skill_registry.skills.values())
-
-    for sk in commands:
-        if not sk.enabled:
-            continue
-
-        @click.command(sk.command, help=sk.description)
-        @click.pass_context
-        def make_command(skill_obj=sk):
-            def command(*args, **kwargs):
-                return skill_obj.handler(*args, **kwargs)
-
-            return command()
-
-        cli.add_command(make_command)
-
-        for alias in sk.aliases:
-            cli.add_command(make_command, name=alias)
-
-    return cli
-
-
-@skill("git status", "Show git repository status", "version-control")
+# Git
+@_skill("git status", "Show git status", "vc")
 def git_status():
-    import subprocess
-
-    result = subprocess.run("git status", shell=True, capture_output=True, text=True)
-    return result.stdout
+    return _r("git status")
 
 
-@skill("git commit", "Commit changes with message", "version-control", ["gc"])
-@click.argument("message")
-def git_commit(message):
-    import subprocess
-
-    subprocess.run(f"git add . && git commit -m '{message}'", shell=True)
-    return f"Committed: {message}"
+@_skill("git commit", "Commit changes", "vc", ["gc"])
+def git_commit(msg):
+    _r(f"git add . && git commit -m '{msg}'")
+    return f"Committed: {msg}"
 
 
-@skill("git push", "Push to remote", "version-control")
+@_skill("git push", "Push to remote", "vc")
 def git_push():
-    import subprocess
-
-    result = subprocess.run("git push", shell=True, capture_output=True, text=True)
-    return result.stdout
+    return _r("git push")
 
 
-@skill("docker ps", "List running containers", "docker")
+# Docker
+@_skill("docker ps", "List containers", "docker")
 def docker_ps():
-    import subprocess
-
-    result = subprocess.run("docker ps", shell=True, capture_output=True, text=True)
-    return result.stdout
+    return _r("docker ps")
 
 
-@skill("docker exec", "Execute command in container", "docker")
-@click.argument("container")
-@click.argument("command")
-def docker_exec(container, command):
-    import subprocess
-
-    result = subprocess.run(
-        f"docker exec {container} {command}", shell=True, capture_output=True, text=True
-    )
-    return result.stdout
+@_skill("docker exec", "Exec in container", "docker")
+def docker_exec(c, cmd):
+    return _r(f"docker exec {c} {cmd}")
 
 
-@skill("system info", "Get system information", "system", ["sysinfo"])
+# System
+@_skill("system info", "System info", "sys", ["si"])
 def system_info():
     import platform
-    import subprocess
 
-    info = {
-        "os": platform.system(),
-        "os_version": platform.version(),
-        "architecture": platform.machine(),
-        "processor": platform.processor(),
-        "hostname": platform.node(),
-    }
-
-    try:
-        result = subprocess.run("free -h", shell=True, capture_output=True, text=True)
-        info["memory"] = result.stdout
-    except:
-        pass
-
-    return json.dumps(info, indent=2)
+    return json.dumps(
+        {"os": platform.system(), "ver": platform.version(), "arch": platform.machine()}
+    )
 
 
-@skill("disk usage", "Check disk usage", "system", ["df"])
+@_skill("disk usage", "Disk usage", "sys", ["df"])
 def disk_usage():
-    import subprocess
-
-    result = subprocess.run("df -h", shell=True, capture_output=True, text=True)
-    return result.stdout
+    return _r("df -h")
 
 
-@skill("process list", "List running processes", "system", ["ps"])
+@_skill("process list", "Running processes", "sys", ["ps"])
 def process_list():
-    import subprocess
-
-    result = subprocess.run("ps aux", shell=True, capture_output=True, text=True)
-    return result.stdout
+    return _r("ps aux")
 
 
-@skill("kill process", "Kill a process by PID", "system")
-@click.argument("pid", type=int)
+@_skill("kill process", "Kill PID", "sys")
 def kill_process(pid):
-    import os
     import signal
 
-    try:
-        os.kill(pid, signal.SIGTERM)
-        return f"Killed process {pid}"
-    except Exception as e:
-        return f"Error: {e}"
+    os.kill(int(pid), signal.SIGTERM)
+    return f"Killed {pid}"
 
 
-@skill("network connections", "Show network connections", "network", ["netstat"])
+# Network
+@_skill("network connections", "Net connections", "net", ["netstat"])
 def network_connections():
-    import subprocess
-
-    result = subprocess.run("netstat -tuln", shell=True, capture_output=True, text=True)
-    return result.stdout
+    return _r("netstat -tuln")
 
 
-@skill("ping", "Ping a host", "network")
-@click.argument("host")
-@click.option("-c", "--count", default=4, help="Number of pings")
-def ping(host, count):
-    import subprocess
-
-    result = subprocess.run(
-        f"ping -c {count} {host}", shell=True, capture_output=True, text=True
-    )
-    return result.stdout
+@_skill("ping", "Ping host", "net")
+def ping(host, count=4):
+    return _r(f"ping -c {count} {host}")
 
 
-@skill("curl request", "Make HTTP request", "network")
-@click.argument("url")
-@click.option("-X", "--method", default="GET")
-@click.option("-d", "--data", default=None)
-@click.option("-H", "--header", multiple=True)
-def curl_request(url, method, data, header):
-    import subprocess
-
-    cmd = f"curl -X {method}"
-    for h in header:
-        cmd += f" -H '{h}'"
-    if data:
-        cmd += f" -d '{data}'"
-    cmd += f" {url}"
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    return result.stdout
-
-
-@skill("run python", "Run Python code", "development")
-@click.argument("code")
+# Dev
+@_skill("run python", "Run Python", "dev")
 def run_python(code):
-    import subprocess
-
-    result = subprocess.run(
-        f"python3 -c '{code}'", shell=True, capture_output=True, text=True
-    )
-    return result.stdout + result.stderr
+    p = _s(f"python3 -c '{code}'", shell=True, capture_output=True, text=True)
+    return p.stdout + p.stderr
 
 
-@skill("run node", "Run Node.js code", "development")
-@click.argument("code")
+@_skill("run node", "Run Node", "dev")
 def run_node(code):
-    import subprocess
-
-    result = subprocess.run(
-        f"node -e '{code}'", shell=True, capture_output=True, text=True
-    )
-    return result.stdout + result.stderr
+    p = _s(f"node -e '{code}'", shell=True, capture_output=True, text=True)
+    return p.stdout + p.stderr
 
 
-@skill("npm install", "Install npm package", "development")
-@click.argument("package")
-def npm_install(package):
-    import subprocess
-
-    result = subprocess.run(
-        f"npm install {package}", shell=True, capture_output=True, text=True
-    )
-    return result.stdout
+@_skill("npm install", "npm i", "dev")
+def npm_install(pkg):
+    return _r(f"npm install {pkg}")
 
 
-@skill("pip install", "Install Python package", "development")
-@click.argument("package")
-def pip_install(package):
-    import subprocess
-
-    result = subprocess.run(
-        f"pip install {package}", shell=True, capture_output=True, text=True
-    )
-    return result.stdout
+@_skill("pip install", "pip i", "dev")
+def pip_install(pkg):
+    return _r(f"pip install {pkg}")
 
 
-@skill("start server", "Start a development server", "development")
-@click.argument("command", default="npm run dev")
-def start_server(command):
-    import subprocess
-
-    subprocess.Popen(command, shell=True)
-    return f"Started: {command}"
+@_skill("start server", "Start dev server", "dev")
+def start_server(cmd):
+    subprocess.Popen(cmd, shell=True)
+    return f"Started: {cmd}"
 
 
-@skill("backup file", "Backup a file", "files", ["cp"])
-@click.argument("path")
+# Files
+@_skill("backup file", "Backup file", "file")
 def backup_file(path):
-    import shutil
-    import datetime
+    import shutil, datetime
 
-    backup_path = f"{path}.backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    shutil.copy2(path, backup_path)
-    return f"Backed up to {backup_path}"
+    bp = f"{path}.backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    shutil.copy2(path, bp)
+    return f"Backed up to {bp}"
 
 
-@skill("find large files", "Find large files", "files")
-@click.option("-m", "--min-size", default="100M", help="Minimum size (e.g., 100M)")
-@click.option("-n", "--num", default=10, help="Number of results")
-def find_large_files(min_size, num):
-    import subprocess
-
-    result = subprocess.run(
-        f"find . -type f -size +{min_size} -exec ls -lh {{}} \\; | sort -k5 -h | tail -{num}",
-        shell=True,
-        capture_output=True,
-        text=True,
+@_skill("find large files", "Large files", "file")
+def find_large_files(min="100M", num=10):
+    return _r(
+        f"find . -type f -size +{min} -exec ls -lh {{}} \\; | sort -k5 -h | tail -{num}"
     )
-    return result.stdout
 
 
-@skill("extract archive", "Extract archive file", "files")
-@click.argument("archive")
+@_skill("extract archive", "Extract tar", "file")
 def extract_archive(archive):
-    import subprocess
-    import shutil
-
-    result = subprocess.run(f"tar -xf {archive}", shell=True)
+    _r(f"tar -xf {archive}")
     return f"Extracted {archive}"
 
 
-@skill("create archive", "Create archive", "files")
-@click.argument("name")
-@click.argument("files", nargs=-1)
+@_skill("create archive", "Create tar", "file")
 def create_archive(name, files):
-    import subprocess
-
-    files_str = " ".join(files)
-    result = subprocess.run(f"tar -czf {name} {files_str}", shell=True)
+    _r(f"tar -czf {name} {' '.join(files)}")
     return f"Created {name}"
 
 
-@skill("weather", "Get weather for location", "utilities")
-@click.argument("location")
-def weather(location):
-    return f"Weather for {location}: (API not configured)"
+# Utils
+@_skill("weather", "Weather", "util")
+def weather(loc):
+    return f"Weather for {loc}: (API not set)"
 
 
-@skill("calculator", "Calculate expression", "utilities", ["calc"])
-@click.argument("expression")
-def calculator(expression):
+@_skill("calculator", "Calc", "util", ["calc"])
+def calculator(expr):
     try:
-        result = eval(expression)
-        return str(result)
+        return str(eval(expr))
     except Exception as e:
         return f"Error: {e}"
 
 
-@skill("password generate", "Generate random password", "utilities")
-@click.option("-l", "--length", default=16)
-@click.option("-s", "--special", is_flag=True)
-def password_generate(length, special):
-    import secrets
-    import string
+@_skill("password generate", "Gen password", "util")
+def password_generate(length=16, special=False):
+    import secrets, string
 
-    chars = string.ascii_letters + string.digits
-    if special:
-        chars += string.punctuation
-    return "".join(secrets.choice(chars) for _ in range(length))
+    c = string.ascii_letters + string.digits + (string.punctuation if special else "")
+    return "".join(secrets.choice(c) for _ in range(length))
 
 
-@skill("url encode", "URL encode string", "utilities")
-@click.argument("text")
+@_skill("url encode", "URL enc", "util")
 def url_encode(text):
     import urllib.parse
 
     return urllib.parse.quote(text)
 
 
-@skill("url decode", "URL decode string", "utilities")
-@click.argument("text")
+@_skill("url decode", "URL dec", "util")
 def url_decode(text):
     import urllib.parse
 
     return urllib.parse.unquote(text)
 
 
-def load_skills_from_file(filepath: str):
-    spec = importlib.util.spec_from_file_location("skills_module", filepath)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["skills_module"] = module
-    spec.loader.exec_module(module)
+def get_skill(n: str) -> Optional[Skill]:
+    return R.get(n)
 
 
-def get_skill(name: str) -> Optional[Skill]:
-    return skill_registry.get(name)
-
-
-def list_skills(category: str = None) -> List[Dict]:
-    if category:
-        return [
-            {"name": s.name, "description": s.description}
-            for s in skill_registry.get_by_category(category)
-        ]
-    return skill_registry.list_all()
+def list_skills(c: str = None) -> List[Dict]:
+    return R.by_cat(c) if c else R.list_all()

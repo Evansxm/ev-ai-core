@@ -1,226 +1,140 @@
-import json
-import asyncio
-import aiohttp
-import ssl
-import certifi
+# v2026-02-efficient-r1 - MCP protocol
+import json, asyncio, aiohttp, ssl, certifi
 from typing import Any, Callable, Dict, List, Optional
-from dataclasses import dataclass, field
 from enum import Enum
 from abc import ABC, abstractmethod
 
 
-class MCPProtocolType(Enum):
+class PT(Enum):
     STDIO = "stdio"
     HTTP = "http"
-    WEBSOCKET = "websocket"
+    WS = "websocket"
 
 
-@dataclass
-class MCPTool:
-    name: str
-    description: str
-    input_schema: Dict
-    handler: Callable
+class MCPBase:
+    def __init__(self, n: str, p: PT = PT.STDIO):
+        self.n, self.p = n, p
+        self.tools, self.res, self.prompts = {}, {}, {}
 
+    async def init(self):
+        return None
 
-@dataclass
-class MCPResource:
-    uri: str
-    name: str
-    description: str
-    mime_type: str = "text/plain"
+    async def handle(self, m: str, params: Dict) -> Dict:
+        return {}
 
+    def _tool(self, n: str, d: str, s: Dict, f):
+        self.tools[n] = {"n": n, "d": d, "s": s, "f": f}
+        return f
 
-@dataclass
-class MCPPrompt:
-    name: str
-    description: str
-    arguments: Dict
+    def _res(self, u: str, n: str, d: str, m="text/plain"):
+        self.res[u] = {"u": u, "n": n, "d": d, "m": m}
+        return lambda x: x
 
+    def _prompt(self, n: str, d: str, a, f):
+        self.prompts[n] = {"n": n, "d": d, "a": a or {}}
+        return f
 
-class MCPBase(ABC):
-    def __init__(self, name: str, protocol: MCPProtocolType = MCPProtocolType.STDIO):
-        self.name = name
-        self.protocol = protocol
-        self.tools: Dict[str, MCPTool] = {}
-        self.resources: Dict[str, MCPResource] = {}
-        self.prompts: Dict[str, MCPPrompt] = {}
-
-    @abstractmethod
-    async def initialize(self):
-        pass
-
-    @abstractmethod
-    async def handle_request(self, method: str, params: Dict) -> Dict:
-        pass
-
-    def tool(self, name: str, description: str, input_schema: Dict):
-        def decorator(func: Callable):
-            self.tools[name] = MCPTool(name, description, input_schema, func)
-            return func
-
-        return decorator
-
-    def resource(
-        self, uri: str, name: str, description: str, mime_type: str = "text/plain"
-    ):
-        def decorator(func: Callable):
-            self.resources[uri] = MCPResource(uri, name, description, mime_type)
-            return func
-
-        return decorator
-
-    def prompt(self, name: str, description: str, arguments: Dict = None):
-        def decorator(func: Callable):
-            self.prompts[name] = MCPPrompt(name, description, arguments or {})
-            return func
-
-        return decorator
-
-    def get_capabilities(self) -> Dict:
+    def caps(self):
         return {
             "tools": {"listChanged": True},
             "resources": {"subscribe": True, "listChanged": True},
             "prompts": {"listChanged": True},
         }
 
-    def get_tools_list(self) -> List[Dict]:
+    def tools_list(self):
+        return [{"n": t["n"], "d": t["d"], "s": t["s"]} for t in self.tools.values()]
+
+    def res_list(self):
         return [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.input_schema,
-            }
-            for tool in self.tools.values()
+            {"u": r["u"], "n": r["n"], "d": r["d"], "m": r["m"]}
+            for r in self.res.values()
         ]
 
-    def get_resources_list(self) -> List[Dict]:
-        return [
-            {
-                "uri": res.uri,
-                "name": res.name,
-                "description": res.description,
-                "mimeType": res.mime_type,
-            }
-            for res in self.resources.values()
-        ]
-
-    def get_prompts_list(self) -> List[Dict]:
-        return [
-            {
-                "name": prompt.name,
-                "description": prompt.description,
-                "arguments": prompt.arguments,
-            }
-            for prompt in self.prompts.values()
-        ]
+    def prompts_list(self):
+        return [{"n": p["n"], "d": p["d"], "a": p["a"]} for p in self.prompts.values()]
 
 
-class MCPStdioServer(MCPBase):
-    def __init__(self, name: str):
-        super().__init__(name, MCPProtocolType.STDIO)
+class MCPServer(MCPBase):
+    def __init__(self, n: str):
+        super().__init__(n, PT.STDIO)
 
-    async def initialize(self):
+    async def init(self):
         pass
 
-    async def handle_request(self, method: str, params: Dict) -> Dict:
-        if method == "initialize":
+    async def handle(self, m: str, params: Dict) -> Dict:
+        if m == "initialize":
             return {
                 "protocolVersion": "2024-11-05",
-                "capabilities": self.get_capabilities(),
-                "serverInfo": {"name": self.name, "version": "1.0.0"},
+                "capabilities": self.caps(),
+                "serverInfo": {"name": self.n, "version": "1.0.0"},
             }
-        elif method == "tools/list":
-            return {"tools": self.get_tools_list()}
-        elif method == "tools/call":
-            tool_name = params.get("name")
-            args = params.get("arguments", {})
-            if tool_name in self.tools:
-                result = await self.tools[tool_name].handler(**args)
-                return {"content": [{"type": "text", "text": str(result)}]}
-        elif method == "resources/list":
-            return {"resources": self.get_resources_list()}
-        elif method == "prompts/list":
-            return {"prompts": self.get_prompts_list()}
+        if m == "tools/list":
+            return {"tools": self.tools_list()}
+        if m == "tools/call":
+            t, a = params.get("name"), params.get("arguments", {})
+            if t in self.tools:
+                r = await self.tools[t]["f"](**a)
+                return {"content": [{"type": "text", "text": str(r)}]}
+        if m == "resources/list":
+            return {"resources": self.res_list()}
+        if m == "prompts/list":
+            return {"prompts": self.prompts_list()}
         return {"error": "Unknown method"}
 
 
-class MCPHttpClient(MCPBase):
-    def __init__(self, name: str, server_url: str, api_key: str = None):
-        super().__init__(name, MCPProtocolType.HTTP)
-        self.server_url = server_url
-        self.api_key = api_key
-        self.session: Optional[aiohttp.ClientSession] = None
-        self._ssl_context = ssl.create_default_context(cafile=certifi.where())
+class MCPClient(MCPBase):
+    def __init__(self, n: str, url: str, key: str = None):
+        super().__init__(n, PT.HTTP)
+        self.url, self.key = url, key
+        self.sess = None
+        self._ssl = ssl.create_default_context(cafile=certifi.where())
 
-    async def initialize(self):
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        self.session = aiohttp.ClientSession(headers=headers)
+    async def init(self):
+        h = {"Content-Type": "application/json"}
+        if self.key:
+            h["Authorization"] = f"Bearer {self.key}"
+        self.sess = aiohttp.ClientSession(headers=h)
 
-    async def call_tool(self, tool_name: str, arguments: Dict) -> Any:
-        if not self.session:
-            await self.initialize()
-        async with self.session.post(
-            f"{self.server_url}/tools/{tool_name}",
-            json=arguments,
-            ssl=self._ssl_context,
-        ) as resp:
-            return await resp.json()
+    async def call(self, t: str, args: Dict) -> Any:
+        if not self.sess:
+            await self.init()
+        async with self.sess.post(
+            f"{self.url}/tools/{t}", json=args, ssl=self._ssl
+        ) as r:
+            return await r.json()
 
     async def list_tools(self) -> List[Dict]:
-        if not self.session:
-            await self.initialize()
-        async with self.session.get(
-            f"{self.server_url}/tools", ssl=self._ssl_context
-        ) as resp:
-            return await resp.json()
+        if not self.sess:
+            await self.init()
+        async with self.sess.get(f"{self.url}/tools", ssl=self._ssl) as r:
+            return await r.json()
 
-    async def get_resource(self, uri: str) -> Any:
-        if not self.session:
-            await self.initialize()
-        async with self.session.get(
-            f"{self.server_url}/resources/{uri}", ssl=self._ssl_context
-        ) as resp:
-            return await resp.json()
+    async def get_res(self, u: str) -> Any:
+        if not self.sess:
+            await self.init()
+        async with self.sess.get(f"{self.url}/resources/{u}", ssl=self._ssl) as r:
+            return await r.json()
 
-    async def handle_request(self, method: str, params: Dict) -> Dict:
-        return await self.call_tool(method, params)
+    async def handle(self, m: str, params: Dict) -> Dict:
+        return await self.call(m, params)
 
 
-class MCPManager:
+class MCPMgr:
     def __init__(self):
         self.servers: Dict[str, MCPBase] = {}
 
-    def register_server(self, name: str, server: MCPBase):
-        self.servers[name] = server
+    def reg(self, n: str, s: MCPBase):
+        self.servers[n] = s
 
-    async def call_tool(self, server_name: str, tool_name: str, **kwargs) -> Any:
-        if server_name in self.servers:
-            return await self.servers[server_name].tools[tool_name].handler(**kwargs)
-        raise ValueError(f"Server {server_name} not found")
+    async def call(self, sn: str, tn: str, **kw) -> Any:
+        if sn in self.servers:
+            return await self.servers[sn].tools[tn]["f"](**kw)
+        raise ValueError(f"Server {sn} not found")
 
-    def get_all_tools(self) -> Dict[str, List[Dict]]:
-        return {name: server.get_tools_list() for name, server in self.servers.items()}
-
-    async def broadcast(self, message: Dict):
-        for server in self.servers.values():
-            await server.handle_request(
-                message.get("method", ""), message.get("params", {})
-            )
+    def all_tools(self):
+        return {n: s.tools_list() for n, s in self.servers.items()}
 
 
-mcp_manager = MCPManager()
-
-
-async def create_stdio_server(name: str) -> MCPStdioServer:
-    server = MCPStdioServer(name)
-    await server.initialize()
-    return server
-
-
-async def create_http_client(name: str, url: str, api_key: str = None) -> MCPHttpClient:
-    client = MCPHttpClient(name, url, api_key)
-    await client.initialize()
-    return client
+_m = MCPMgr()
+create_server = lambda n: MCPServer(n)
+create_client = lambda n, u, k=None: MCPClient(n, u, k)

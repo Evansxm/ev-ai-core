@@ -1,6 +1,8 @@
+# v2026-02-efficient-r1 - Evans AI Core
+__version__ = "1.0.0"
+
 from .memory import (
     MemorySystem,
-    memory,
     remember,
     recall,
     search_memories,
@@ -9,24 +11,9 @@ from .memory import (
     learn_skill,
     get_learned_skills,
 )
-from .mcp import (
-    MCPBase,
-    MCPStdioServer,
-    MCPHttpClient,
-    MCPManager,
-    mcp_manager,
-    create_stdio_server,
-    create_http_client,
-)
-from .tools import registry, ToolRegistry, bash, read_file, write_file, execute_tool
-from .skills import (
-    skill_registry,
-    Skill,
-    skill,
-    list_skills,
-    get_skill,
-    create_click_group,
-)
+from .mcp import MCPServer, MCPClient, MCPMgr, create_server, create_client
+from .tools import ToolRegistry, bash, read_file, write_file, exec_tool
+from .skills import Skill, SkillRegistry, skill, get_skill, list_skills
 from .server import (
     HTTPServer,
     WebSocketServer,
@@ -55,10 +42,8 @@ from .proactive import (
     set_user_context,
 )
 
-__version__ = "1.0.0"
 __all__ = [
     "MemorySystem",
-    "memory",
     "remember",
     "recall",
     "search_memories",
@@ -66,25 +51,21 @@ __all__ = [
     "get_user_preferences",
     "learn_skill",
     "get_learned_skills",
-    "MCPBase",
-    "MCPStdioServer",
-    "MCPHttpClient",
-    "MCPManager",
-    "mcp_manager",
-    "create_stdio_server",
-    "create_http_client",
-    "registry",
+    "MCPServer",
+    "MCPClient",
+    "MCPMgr",
+    "create_server",
+    "create_client",
     "ToolRegistry",
     "bash",
     "read_file",
     "write_file",
-    "execute_tool",
-    "skill_registry",
+    "exec_tool",
     "Skill",
+    "SkillRegistry",
     "skill",
-    "list_skills",
     "get_skill",
-    "create_click_group",
+    "list_skills",
     "HTTPServer",
     "WebSocketServer",
     "TCPServer",

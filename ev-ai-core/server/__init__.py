@@ -1,20 +1,14 @@
-import asyncio
-import json
-import websockets
-import socket
-import http.server
-import socketserver
-import threading
-from typing import Any, Callable, Dict, List, Optional
+# v2026-02-efficient-r1 - Server framework (HTTP/WS/TCP)
+import asyncio, json, websockets, http.server, socketserver, threading
+from typing import Any, Callable, Dict, Optional
 from dataclasses import dataclass
 from enum import Enum
-from abc import ABC, abstractmethod
 import ssl
 
 
 class ServerType(Enum):
     HTTP = "http"
-    WEBSOCKET = "websocket"
+    WS = "websocket"
     TCP = "tcp"
 
 
@@ -26,210 +20,186 @@ class Route:
 
 
 class HTTPServer:
-    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
-        self.host = host
-        self.port = port
+    def __init__(self, host="0.0.0.0", port=8080):
+        self.host, self.port = host, port
         self.routes: Dict[str, Dict[str, Callable]] = {}
         self.server = None
         self.thread = None
 
-    def route(self, path: str, method: str = "GET"):
-        def decorator(func: Callable):
-            if path not in self.routes:
-                self.routes[path] = {}
-            self.routes[path][method.upper()] = func
+    def route(self, path, method="GET"):
+        def dec(func):
+            self.routes.setdefault(path, {})[method.upper()] = func
             return func
 
-        return decorator
+        return dec
 
     def _make_handler(self):
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_method(method):
-                def handler(self):
-                    path = self.path.split("?")[0]
-                    if (
-                        path in self.server.routes
-                        and method in self.server.routes[path]
-                    ):
-                        handler = self.server.routes[path][method]
-                        content_length = int(self.headers.get("Content-Length", 0))
-                        body = (
-                            self.rfile.read(content_length).decode()
-                            if content_length > 0
-                            else None
-                        )
-
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_method(m):
+                def h(self):
+                    p = self.path.split("?")[0]
+                    if p in self.server.routes and m in self.server.routes[p]:
                         try:
-                            result = handler(body)
+                            h = self.server.routes[p][m]
+                            l = int(self.headers.get("Content-Length", 0))
+                            b = self.rfile.read(l).decode() if l else None
+                            r = h(b)
                             self.send_response(200)
                             self.send_header("Content-Type", "application/json")
                             self.end_headers()
-                            self.wfile.write(json.dumps(result).encode())
+                            self.wfile.write(json.dumps(r).encode())
                         except Exception as e:
                             self.send_response(500)
                             self.send_header("Content-Type", "application/json")
                             self.end_headers()
-                            self.wfile.write(json.dumps({"error": str(e)}).encode())
+                            self.wfile.write(json.dumps({"e": str(e)}).encode())
                     else:
                         self.send_response(404)
                         self.end_headers()
 
-                return handler
+                return h
 
             do_GET = do_method("GET")
             do_POST = do_method("POST")
             do_PUT = do_method("PUT")
             do_DELETE = do_method("DELETE")
 
-            def log_message(self, format, *args):
+            def log_message(self, *a):
                 pass
 
-        Handler.server = self
-        return Handler
+        H.server = self
+        return H
 
-    def start(self, blocking: bool = True):
+    def start(self, block=True):
         self.server = socketserver.TCPServer(
             (self.host, self.port), self._make_handler()
         )
-        print(f"HTTP Server started on {self.host}:{self.port}")
-
-        if blocking:
+        print(f"HTTP on {self.host}:{self.port}")
+        if block:
             self.server.serve_forever()
         else:
-            self.thread = threading.Thread(target=self.server.serve_forever)
-            self.thread.daemon = True
+            self.thread = threading.Thread(
+                target=self.server.serve_forever, daemon=True
+            )
             self.thread.start()
 
     def stop(self):
-        if self.server:
-            self.server.shutdown()
+        self.server and self.server.shutdown()
 
 
 class WebSocketServer:
-    def __init__(self, host: str = "0.0.0.0", port: int = 8765):
-        self.host = host
-        self.port = port
+    def __init__(self, host="0.0.0.0", port=8765):
+        self.host, self.port = host, port
         self.clients = set()
         self.handlers: Dict[str, Callable] = {}
         self.server = None
 
-    def on(self, event: str):
-        def decorator(func: Callable):
+    def on(self, event):
+        def dec(func):
             self.handlers[event] = func
             return func
 
-        return decorator
+        return dec
 
-    async def handle_client(self, websocket, path):
-        self.clients.add(websocket)
+    async def handle_client(self, ws, path):
+        self.clients.add(ws)
         try:
-            async for message in websocket:
+            async for msg in ws:
                 try:
-                    data = json.loads(message)
-                    event = data.get("event", "message")
-                    payload = data.get("data", {})
-
-                    if event in self.handlers:
-                        result = await self.handlers[event](payload, websocket)
-                        if result is not None:
-                            await websocket.send(json.dumps(result))
-                    else:
-                        await websocket.send(
-                            json.dumps({"error": f"Unknown event: {event}"})
-                        )
+                    d = json.loads(msg)
+                    e = d.get("event", "message")
+                    if e in self.handlers:
+                        r = await self.handlers[e](d.get("data", {}), ws)
+                        if r:
+                            await ws.send(json.dumps(r))
                 except json.JSONDecodeError:
-                    await websocket.send(json.dumps({"error": "Invalid JSON"}))
+                    await ws.send(json.dumps({"e": "Invalid JSON"}))
         finally:
-            self.clients.remove(websocket)
+            self.clients.discard(ws)
 
-    async def broadcast(self, message: Dict):
+    async def broadcast(self, msg):
         if self.clients:
             await asyncio.gather(
-                *[client.send(json.dumps(message)) for client in self.clients],
-                return_exceptions=True,
+                *[c.send(json.dumps(msg)) for c in self.clients], return_exceptions=True
             )
 
     async def start(self):
         self.server = await websockets.serve(self.handle_client, self.host, self.port)
-        print(f"WebSocket Server started on ws://{self.host}:{self.port}")
+        print(f"WS on ws://{self.host}:{self.port}")
 
     def stop(self):
-        if self.server:
-            self.server.close()
+        self.server and self.server.close()
 
 
 class TCPServer:
-    def __init__(self, host: str = "0.0.0.0", port: int = 9999):
-        self.host = host
-        self.port = port
+    def __init__(self, host="0.0.0.0", port=9999):
+        self.host, self.port = host, port
         self.clients = []
-        self.handler: Optional[Callable] = None
+        self.handler = None
         self.server = None
 
-    def on_message(self, func: Callable):
+    def on_message(self, func):
         self.handler = func
         return func
 
-    async def handle_client(self, reader, writer):
-        addr = writer.get_extra_info("peername")
-        self.clients.append((addr, writer))
-
+    async def handle_client(self, r, w):
+        addr = w.get_extra_info("peername")
+        self.clients.append((addr, w))
         try:
             while True:
-                data = await reader.read(100)
-                if not data:
+                d = await r.read(100)
+                if not d:
                     break
-                message = data.decode()
+                m = d.decode()
                 if self.handler:
-                    response = await self.handler(message, addr)
-                    if response:
-                        writer.write(response.encode())
-                        await writer.drain()
+                    rply = await self.handler(m, addr)
+                    if rply:
+                        w.write(rply.encode())
+                        await w.drain()
         finally:
-            self.clients.remove((addr, writer))
-            writer.close()
+            self.clients.remove((addr, w))
+            w.close()
 
     async def start(self):
         self.server = await asyncio.start_server(
             self.handle_client, self.host, self.port
         )
-        print(f"TCP Server started on {self.host}:{self.port}")
+        print(f"TCP on {self.host}:{self.port}")
         async with self.server:
             await self.server.serve_forever()
 
     def stop(self):
-        if self.server:
-            self.server.close()
+        self.server and self.server.close()
 
 
-class WebSocketClient:
-    def __init__(self, url: str):
+class WSClient:
+    def __init__(self, url):
         self.url = url
         self.ws = None
-        self.handlers: Dict[str, Callable] = {}
+        self.handlers = {}
 
-    def on(self, event: str):
-        def decorator(func: Callable):
+    def on(self, event):
+        def dec(func):
             self.handlers[event] = func
             return func
 
-        return decorator
+        return dec
 
     async def connect(self):
         self.ws = await websockets.connect(self.url)
-        asyncio.create_task(self._receive())
+        asyncio.create_task(self._recv())
 
-    async def _receive(self):
-        async for message in self.ws:
+    async def _recv(self):
+        async for m in self.ws:
             try:
-                data = json.loads(message)
-                event = data.get("event", "message")
-                if event in self.handlers:
-                    await self.handlers[event](data.get("data", {}))
+                d = json.loads(m)
+                e = d.get("event", "message")
+                if e in self.handlers:
+                    await self.handlers[e](d.get("data", {}))
             except:
                 pass
 
-    async def send(self, event: str, data: Any = None):
+    async def send(self, event, data=None):
         if self.ws:
             await self.ws.send(json.dumps({"event": event, "data": data}))
 
@@ -239,67 +209,51 @@ class WebSocketClient:
 
 
 class TCPClient:
-    def __init__(self, host: str, port: int):
-        self.host = host
-        self.port = port
-        self.reader = None
-        self.writer = None
+    def __init__(self, host, port):
+        self.host, self.port = host, port
+        self.r, self.w = None, None
 
     async def connect(self):
-        self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
+        self.r, self.w = await asyncio.open_connection(self.host, self.port)
 
-    async def send(self, message: str) -> str:
-        if not self.writer:
+    async def send(self, msg):
+        if not self.w:
             await self.connect()
-        self.writer.write(message.encode())
-        await self.writer.drain()
-        data = await self.reader.read(100)
-        return data.decode()
+        self.w.write(msg.encode())
+        await self.w.drain()
+        d = await self.r.read(100)
+        return d.decode()
 
     async def close(self):
-        if self.writer:
-            self.writer.close()
-            await self.writer.wait_closed()
+        if self.w:
+            self.w.close()
+            await self.w.wait_closed()
 
 
 class JSONRPCClient:
-    def __init__(self, url: str):
+    def __init__(self, url):
         self.url = url
-        self.request_id = 0
+        self.rid = 0
 
-    async def call(self, method: str, params: Dict = None) -> Any:
-        import urllib.request
-        import urllib.error
+    async def call(self, method, params=None):
+        import urllib.request, urllib.error
 
-        self.request_id += 1
-        request = {
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params or {},
-            "id": self.request_id,
-        }
-
-        data = json.dumps(request).encode()
-        req = urllib.request.Request(
-            self.url, data=data, headers={"Content-Type": "application/json"}
-        )
-
+        self.rid += 1
+        req = json.dumps(
+            {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": self.rid}
+        ).encode()
         try:
-            with urllib.request.urlopen(req) as resp:
-                response = json.loads(resp.read())
-                return response.get("result")
+            with urllib.request.Request(
+                self.url, data=req, headers={"Content-Type": "application/json"}
+            ) as r:
+                with urllib.request.urlopen(r) as resp:
+                    return json.loads(resp.read()).get("result")
         except urllib.error.HTTPError as e:
-            error = json.loads(e.read())
-            raise Exception(error.get("error", {}).get("message", str(e)))
+            raise Exception(
+                json.loads(e.read()).get("error", {}).get("message", str(e))
+            )
 
 
-def create_api_server(host: str = "0.0.0.0", port: int = 8080) -> HTTPServer:
-    return HTTPServer(host, port)
-
-
-def create_ws_server(host: str = "0.0.0.0", port: int = 8765) -> WebSocketServer:
-    return WebSocketServer(host, port)
-
-
-def create_tcp_server(host: str = "0.0.0.0", port: int = 9999) -> TCPServer:
-    return TCPServer(host, port)
+create_api_server = lambda h="0.0.0.0", p=8080: HTTPServer(h, p)
+create_ws_server = lambda h="0.0.0.0", p=8765: WebSocketServer(h, p)
+create_tcp_server = lambda h="0.0.0.0", p=9999: TCPServer(h, p)

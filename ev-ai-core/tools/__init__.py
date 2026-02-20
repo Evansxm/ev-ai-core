@@ -1,284 +1,254 @@
-import subprocess
-import os
-import json
-import re
-import hashlib
-import base64
-import yaml
-import csv
-import xml.etree.ElementTree as ET
+# v2026-02-efficient-r1 - Tools library
+import subprocess, os, json, re, hashlib, base64, yaml, csv, xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from datetime import datetime, timedelta
-import fnmatch
 
 
 class ToolRegistry:
+    __slots__ = ("tools",)
+
     def __init__(self):
         self.tools = {}
 
-    def register(self, name: str, func: callable, description: str = ""):
-        self.tools[name] = {"func": func, "description": description}
+    def reg(self, n: str, f: callable, d: str = ""):
+        self.tools[n] = (f, d)
 
-    def execute(self, name: str, **kwargs) -> Any:
-        if name in self.tools:
-            return self.tools[name]["func"](**kwargs)
-        raise ValueError(f"Tool {name} not found")
+    def exec(self, n: str, **kw):
+        return self.tools[n][0](**kw)
 
-    def list_tools(self) -> List[Dict]:
-        return [
-            {"name": k, "description": v["description"]} for k, v in self.tools.items()
-        ]
+    def list(self):
+        return [{"n": k, "d": v[1]} for k, v in self.tools.items()]
 
 
-registry = ToolRegistry()
+r = ToolRegistry()
+_b = subprocess.run
 
 
-def bash(command: str, timeout: int = 30) -> str:
+def bash(cmd: str, to: int = 30) -> str:
     try:
-        result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, timeout=timeout
-        )
-        return f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}\nEXIT: {result.returncode}"
+        p = _b(cmd, shell=True, capture_output=True, text=True, timeout=to)
+        return f"STDOUT:\n{p.stdout}\nSTDERR:\n{p.stderr}\nEXIT: {p.returncode}"
     except subprocess.TimeoutExpired:
-        return "ERROR: Command timed out"
+        return "ERROR: Timeout"
     except Exception as e:
-        return f"ERROR: {str(e)}"
+        return f"ERROR: {e}"
 
 
-def read_file(path: str, encoding: str = "utf-8") -> str:
-    with open(path, "r", encoding=encoding) as f:
-        return f.read()
+def read(p: str, enc: str = "utf-8") -> str:
+    return open(p, "r", encoding=enc).read()
 
 
-def write_file(path: str, content: str, encoding: str = "utf-8") -> str:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding=encoding) as f:
-        f.write(content)
-    return f"Written to {path}"
+def write(p: str, c: str, enc: str = "utf-8") -> str:
+    Path(p).parent.mkdir(parents=True, exist_ok=True)
+    open(p, "w", encoding=enc).write(c)
+    return f"Written to {p}"
 
 
-def file_exists(path: str) -> bool:
-    return os.path.exists(path)
+def exists(p: str) -> bool:
+    return os.path.exists(p)
 
 
-def list_files(pattern: str = "*", path: str = ".") -> List[str]:
-    matches = []
-    for root, dirs, files in os.walk(path):
-        for name in files:
-            if fnmatch.fnmatch(name, pattern):
-                matches.append(os.path.join(root, name))
-    return matches
+def glob(pat: str = "*", path: str = ".") -> List[str]:
+    import fnmatch
+
+    return [
+        os.path.join(root, f)
+        for root, _, files in os.walk(path)
+        for f in files
+        if fnmatch.fnmatch(f, pat)
+    ]
 
 
-def search_in_file(pattern: str, path: str, context_lines: int = 2) -> List[str]:
-    results = []
-    with open(path, "r") as f:
+def grep(pat: str, path: str, ctx: int = 2) -> List[str]:
+    with open(path) as f:
         lines = f.readlines()
-    for i, line in enumerate(lines):
-        if re.search(pattern, line):
-            start = max(0, i - context_lines)
-            end = min(len(lines), i + context_lines + 1)
-            results.append(f"Line {i + 1}: {''.join(lines[start:end])}")
-    return results
+    return [
+        f"Line {i + 1}: {''.join(lines[max(0, i - ctx) : min(len(lines), i + ctx + 1)])}"
+        for i, line in enumerate(lines)
+        if re.search(pat, line)
+    ]
 
 
-def get_file_info(path: str) -> Dict:
-    stat = os.stat(path)
+def file_info(p: str) -> Dict:
+    s = os.stat(p)
     return {
-        "path": path,
-        "size": stat.st_size,
-        "created": datetime.fromtimestamp(stat.st_ctime).isoformat(),
-        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-        "is_file": os.path.isfile(path),
-        "is_dir": os.path.isdir(path),
+        "p": p,
+        "s": s.st_size,
+        "c": datetime.fromtimestamp(s.st_ctime).isoformat(),
+        "m": datetime.fromtimestamp(s.st_mtime).isoformat(),
+        "if": os.path.isfile(p),
+        "id": os.path.isdir(p),
     }
 
 
-def json_parse(content: str) -> Any:
-    return json.loads(content)
+_jd = json.dumps
+_jl = json.loads
 
 
-def json_create(obj: Any, indent: int = 2) -> str:
-    return json.dumps(obj, indent=indent)
+def json_parse(c: str) -> Any:
+    return _jl(c)
 
 
-def yaml_parse(content: str) -> Any:
-    return yaml.safe_load(content)
+def json_create(o: Any, ind: int = 2) -> str:
+    return _jd(o, indent=ind)
 
 
-def yaml_create(obj: Any) -> str:
-    return yaml.dump(obj)
+def yaml_parse(c: str) -> Any:
+    return yaml.safe_load(c)
 
 
-def csv_read(path: str) -> List[Dict]:
-    with open(path, "r") as f:
-        reader = csv.DictReader(f)
-        return list(reader)
+def yaml_create(o: Any) -> str:
+    return yaml.dump(o)
 
 
-def csv_write(path: str, data: List[Dict], fieldnames: List[str] = None):
+def csv_read(p: str) -> List[Dict]:
+    with open(p) as f:
+        return list(csv.DictReader(f))
+
+
+def csv_write(p: str, data: List[Dict], fn: List[str] = None):
     if not data:
-        return "No data to write"
-    fieldnames = fieldnames or list(data[0].keys())
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(data)
-    return f"Written {len(data)} rows to {path}"
+        return "No data"
+    fn = fn or list(data[0].keys())
+    with open(p, "w", newline="") as f:
+        csv.DictWriter(f, fieldnames=fn).writeheader()
+        csv.DictWriter(f, fieldnames=fn).writerows(data)
+    return f"Written {len(data)} rows"
 
 
-def xml_parse(content: str) -> ET.Element:
-    return ET.fromstring(content)
+def xml_parse(c: str) -> ET.Element:
+    return ET.fromstring(c)
 
 
-def xml_create(root_tag: str, data: Dict) -> str:
-    root = ET.Element(root_tag)
-    for key, value in data.items():
-        child = ET.SubElement(root, key)
-        child.text = str(value)
-    return ET.tostring(root, encoding="unicode")
+def xml_create(root: str, d: Dict) -> str:
+    r = ET.Element(root)
+    for k, v in d.items():
+        ET.SubElement(r, k).text = str(v)
+    return ET.tostring(r, encoding="unicode")
 
 
-def http_request(
-    url: str, method: str = "GET", headers: Dict = None, data: Any = None
-) -> Dict:
-    import urllib.request
-    import urllib.error
+def http(url: str, method: str = "GET", hdrs: Dict = None, data: Any = None) -> Dict:
+    import urllib.request, urllib.error
 
     req = urllib.request.Request(url, method=method)
-    if headers:
-        for k, v in headers.items():
-            req.add_header(k, v)
+    [req.add_header(k, v) for k, v in (hdrs or {}).items()]
     if data:
-        if isinstance(data, dict):
-            data = json.dumps(data).encode()
-        req.data = data
-
+        req.data = (
+            json.dumps(data).encode() if isinstance(data, dict) else data.encode()
+        )
     try:
         with urllib.request.urlopen(req) as resp:
             return {
-                "status": resp.status,
-                "headers": dict(resp.headers),
-                "body": resp.read().decode(),
+                "s": resp.status,
+                "h": dict(resp.headers),
+                "b": resp.read().decode(),
             }
     except urllib.error.HTTPError as e:
-        return {"status": e.code, "error": str(e)}
+        return {"s": e.code, "e": str(e)}
 
 
-def hash_content(content: str, algorithm: str = "sha256") -> str:
-    if algorithm == "md5":
-        return hashlib.md5(content.encode()).hexdigest()
-    elif algorithm == "sha1":
-        return hashlib.sha1(content.encode()).hexdigest()
-    elif algorithm == "sha256":
-        return hashlib.sha256(content.encode()).hexdigest()
-    return hashlib.sha256(content.encode()).hexdigest()
+_algs = {"md5": hashlib.md5, "sha1": hashlib.sha1, "sha256": hashlib.sha256}
 
 
-def base64_encode(content: str) -> str:
-    return base64.b64encode(content.encode()).decode()
+def hash(c: str, alg: str = "sha256") -> str:
+    return _algs.get(alg, hashlib.sha256)(c.encode()).hexdigest()
 
 
-def base64_decode(content: str) -> str:
-    return base64.b64decode(content.encode()).decode()
+def b64e(c: str) -> str:
+    return base64.b64encode(c.encode()).decode()
 
 
-def regex_match(pattern: str, content: str, flags: int = 0) -> List[str]:
-    return re.findall(pattern, content, flags)
+def b64d(c: str) -> str:
+    return base64.b64decode(c.encode()).decode()
 
 
-def regex_replace(pattern: str, content: str, replacement: str, flags: int = 0) -> str:
-    return re.sub(pattern, replacement, content, flags=flags)
+def re_match(pat: str, c: str, f: int = 0) -> List[str]:
+    return re.findall(pat, c, f)
 
 
-def timestamp_now() -> str:
+def re_replace(pat: str, c: str, repl: str, f: int = 0) -> str:
+    return re.sub(pat, repl, c, flags=f)
+
+
+def ts_now() -> str:
     return datetime.now().isoformat()
 
 
-def timestamp_parse(date_str: str) -> datetime:
-    return datetime.fromisoformat(date_str)
+def ts_parse(s: str) -> datetime:
+    return datetime.fromisoformat(s)
 
 
-def timestamp_add(
-    date_str: str, days: int = 0, hours: int = 0, minutes: int = 0
-) -> str:
-    dt = datetime.fromisoformat(date_str)
-    dt += timedelta(days=days, hours=hours, minutes=minutes)
-    return dt.isoformat()
+def ts_add(s: str, d: int = 0, h: int = 0, m: int = 0) -> str:
+    return (
+        datetime.fromisoformat(s) + timedelta(days=d, hours=h, minutes=m)
+    ).isoformat()
 
 
-def env_get(key: str, default: str = None) -> str:
-    return os.environ.get(key, default)
+def env_get(k: str, d: str = None) -> str:
+    return os.environ.get(k, d)
 
 
-def env_set(key: str, value: str):
-    os.environ[key] = value
-    return f"Set {key}"
+def env_set(k: str, v: str):
+    os.environ[k] = v
+    return f"Set {k}"
 
 
-def clipboard_get() -> str:
-    result = subprocess.run(
+def clip_get() -> str:
+    return _b(
         "xclip -selection clipboard -o", shell=True, capture_output=True, text=True
-    )
-    return result.stdout
+    ).stdout
 
 
-def clipboard_set(content: str):
-    subprocess.run(f"echo '{content}' | xclip -selection clipboard", shell=True)
-    return "Copied to clipboard"
+def clip_set(c: str):
+    _b(f"echo '{c}' | xclip -selection clipboard", shell=True)
+    return "Copied"
 
 
-def screenshot(save_path: str = None):
-    if not save_path:
-        save_path = f"/tmp/screenshot_{timestamp_now()}.png"
-    subprocess.run(f"scrot {save_path}", shell=True)
-    return f"Saved to {save_path}"
+def screenshot(p: str = None):
+    if not p:
+        p = f"/tmp/screenshot_{ts_now()}.png"
+    _b(f"scrot {p}", shell=True)
+    return f"Saved to {p}"
 
 
-def notify(title: str, message: str):
-    subprocess.run(f"notify-send '{title}' '{message}'", shell=True)
-    return "Notification sent"
+def notify(t: str, m: str):
+    _b(f"notify-send '{t}' '{m}'", shell=True)
+    return "Sent"
 
 
-def get_clipboard():
-    return clipboard_get()
+# Register all
+for n, f, d in [
+    ("bash", bash, "Run bash"),
+    ("read", read, "Read file"),
+    ("write", write, "Write file"),
+    ("exists", exists, "Check exists"),
+    ("glob", glob, "Find files"),
+    ("grep", grep, "Search file"),
+    ("file_info", file_info, "File info"),
+    ("json_parse", json_parse, "Parse JSON"),
+    ("json_create", json_create, "Create JSON"),
+    ("yaml_parse", yaml_parse, "Parse YAML"),
+    ("yaml_create", yaml_create, "Create YAML"),
+    ("csv_read", csv_read, "Read CSV"),
+    ("csv_write", csv_write, "Write CSV"),
+    ("xml_parse", xml_parse, "Parse XML"),
+    ("xml_create", xml_create, "Create XML"),
+    ("http", http, "HTTP req"),
+    ("hash", hash, "Hash"),
+    ("b64e", b64e, "Base64 enc"),
+    ("b64d", b64d, "Base64 dec"),
+    ("re_match", re_match, "Regex match"),
+    ("re_replace", re_replace, "Regex replace"),
+    ("ts", ts_now, "Timestamp"),
+    ("ts_add", ts_add, "Add time"),
+    ("env_get", env_get, "Get env"),
+    ("env_set", env_set, "Set env"),
+    ("clip_get", clip_get, "Get clipboard"),
+    ("clip_set", clip_set, "Set clipboard"),
+    ("screenshot", screenshot, "Screenshot"),
+    ("notify", notify, "Notify"),
+]:
+    r.reg(n, f, d)
 
-
-def set_clipboard(content: str):
-    return clipboard_set(content)
-
-
-registry.register("bash", bash, "Execute bash command")
-registry.register("read", read_file, "Read file contents")
-registry.register("write", write_file, "Write to file")
-registry.register("exists", file_exists, "Check if file exists")
-registry.register("glob", list_files, "Find files by pattern")
-registry.register("grep", search_in_file, "Search in file")
-registry.register("file_info", get_file_info, "Get file information")
-registry.register("json_parse", json_parse, "Parse JSON")
-registry.register("json_create", json_create, "Create JSON")
-registry.register("yaml_parse", yaml_parse, "Parse YAML")
-registry.register("yaml_create", yaml_create, "Create YAML")
-registry.register("csv_read", csv_read, "Read CSV")
-registry.register("csv_write", csv_write, "Write CSV")
-registry.register("xml_parse", xml_parse, "Parse XML")
-registry.register("xml_create", xml_create, "Create XML")
-registry.register("http", http_request, "Make HTTP request")
-registry.register("hash", hash_content, "Hash content")
-registry.register("base64_encode", base64_encode, "Base64 encode")
-registry.register("base64_decode", base64_decode, "Base64 decode")
-registry.register("regex_match", regex_match, "Regex match")
-registry.register("regex_replace", regex_replace, "Regex replace")
-registry.register("timestamp", timestamp_now, "Get current timestamp")
-registry.register("timestamp_add", timestamp_add, "Add time")
-registry.register("env_get", env_get, "Get env variable")
-registry.register("env_set", env_set, "Set env variable")
-registry.register("clipboard_get", get_clipboard, "Get clipboard")
-registry.register("clipboard_set", set_clipboard, "Set clipboard")
-registry.register("screenshot", screenshot, "Take screenshot")
-registry.register("notify", notify, "Send notification")
-
-
-def execute_tool(tool_name: str, **kwargs) -> Any:
-    return registry.execute(tool_name, **kwargs)
+exec_tool = r.exec

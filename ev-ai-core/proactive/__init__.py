@@ -1,223 +1,147 @@
-import re
-import json
-import os
-from typing import Any, Callable, Dict, List, Optional, Pattern
-from dataclasses import dataclass, field
-from datetime import datetime
+# v2026-02-efficient-r1 - Proactive action engine
+import re, time, threading
+from typing import Any, Callable, Dict, List
 from enum import Enum
-import threading
-import time
 
 
-class TriggerType(Enum):
+class TT(Enum):
     KEYWORD = "keyword"
     PATTERN = "pattern"
     TIME = "time"
-    CONTEXT = "context"
-    ACTION = "action"
 
 
-class ActionPriority(Enum):
+class AP(Enum):
     LOW = 1
     NORMAL = 2
     HIGH = 3
     CRITICAL = 4
 
 
-@dataclass
 class Trigger:
-    type: TriggerType
-    pattern: str
-    regex: Pattern = field(init=False)
+    def __init__(self, t: TT, p: str):
+        self.t, self.p = t, p
+        self.rx = re.compile(p, re.I) if t in (TT.KEYWORD, TT.PATTERN) else None
 
-    def __post_init__(self):
-        if self.type in [TriggerType.KEYWORD, TriggerType.PATTERN]:
-            self.regex = re.compile(self.pattern, re.IGNORECASE)
-
-    def matches(self, text: str) -> bool:
-        if self.type == TriggerType.KEYWORD:
-            return self.pattern.lower() in text.lower()
-        elif self.type == TriggerType.PATTERN:
-            return bool(self.regex.search(text))
+    def m(self, txt: str) -> bool:
+        if self.t == TT.KEYWORD:
+            return self.p.lower() in txt.lower()
+        if self.t == TT.PATTERN:
+            return bool(self.rx.search(txt))
         return False
 
 
-@dataclass
 class Action:
-    name: str
-    handler: Callable
-    description: str
-    priority: ActionPriority = ActionPriority.NORMAL
-    enabled: bool = True
-    cooldown: int = 0
-    _last_run: float = field(default=0, init=False)
-
-
-class ProactiveEngine:
-    def __init__(self):
-        self.triggers: List[Trigger] = []
-        self.actions: Dict[str, Action] = {}
-        self.action_triggers: Dict[str, List[Trigger]] = {}
-        self.learned_patterns: Dict[str, List[str]] = {}
-        self.context: Dict[str, Any] = {}
-        self._monitoring = False
-        self._monitor_thread = None
-
-    def add_trigger(self, trigger: Trigger, action_name: str):
-        self.triggers.append(trigger)
-        if action_name not in self.action_triggers:
-            self.action_triggers[action_name] = []
-        self.action_triggers[action_name].append(trigger)
-
-    def register_action(self, action: Action):
-        self.actions[action.name] = action
-
-    def on_keyword(self, keyword: str, action_name: str):
-        trigger = Trigger(TriggerType.KEYWORD, keyword)
-        self.add_trigger(trigger, action_name)
-
-    def on_pattern(self, pattern: str, action_name: str):
-        trigger = Trigger(TriggerType.PATTERN, pattern)
-        self.add_trigger(trigger, action_name)
-
-    def on_time_interval(self, interval_seconds: int, action_name: str):
-        trigger = Trigger(TriggerType.TIME, str(interval_seconds))
-        self.add_trigger(trigger, action_name)
-
-    def trigger(
-        self,
-        name: str,
-        description: str = "",
-        priority: ActionPriority = ActionPriority.NORMAL,
+    def __init__(
+        self, n: str, h: Callable, d: str = "", p: AP = AP.NORMAL, cd: int = 0
     ):
-        def decorator(func: Callable):
-            action = Action(
-                name=name, handler=func, description=description, priority=priority
-            )
-            self.register_action(action)
-            return func
+        self.n, self.h, self.d, self.p, self.cd = n, h, d, p, cd
+        self.lr = 0.0
 
-        return decorator
 
-    def analyze_input(self, text: str) -> List[Action]:
-        triggered = []
+class PE:
+    def __init__(self):
+        self.T: List[Trigger] = []
+        self.A: Dict[str, Action] = {}
+        self.AT: Dict[str, List[Trigger]] = {}
+        self.L: Dict[str, List[str]] = {}
+        self.C: Dict[str, Any] = {}
+        self._m, self._mt = False, None
 
-        for action_name, triggers in self.action_triggers.items():
-            action = self.actions.get(action_name)
-            if not action or not action.enabled:
+    def reg(self, a: Action):
+        self.A[a.n] = a
+
+    def on_kw(self, kw: str, an: str):
+        t = Trigger(TT.KEYWORD, kw)
+        self.T.append(t)
+        self.AT.setdefault(an, []).append(t)
+
+    def on_pat(self, pat: str, an: str):
+        t = Trigger(TT.PATTERN, pat)
+        self.T.append(t)
+        self.AT.setdefault(an, []).append(t)
+
+    def trig(self, n: str, d: str = "", p: AP = AP.NORMAL):
+        def dec(f: Callable):
+            self.reg(Action(n, f, d, p))
+            return f
+
+        return dec
+
+    def analyze(self, txt: str) -> List[Action]:
+        r = []
+        for an, ts in self.AT.items():
+            a = self.A.get(an)
+            if not a:
                 continue
-
-            for trigger in triggers:
-                if trigger.matches(text):
-                    if action.cooldown > 0:
+            for t in ts:
+                if t.m(txt):
+                    if a.cd > 0:
                         now = time.time()
-                        if now - action._last_run < action.cooldown:
+                        if now - a.lr < a.cd:
                             continue
-                        action._last_run = now
-                    triggered.append(action)
+                        a.lr = now
+                    r.append(a)
                     break
+        r.sort(key=lambda x: x.p.value, reverse=True)
+        return r
 
-        triggered.sort(key=lambda a: a.priority.value, reverse=True)
-        return triggered
-
-    def execute_actions(self, actions: List[Action], context: Dict = None) -> List[Any]:
-        results = []
-        for action in actions:
+    def exec_act(self, acts: List[Action], ctx: Dict = None) -> List[Dict]:
+        res = []
+        for a in acts:
             try:
-                ctx = {**self.context, **(context or {})}
-                result = action.handler(ctx)
-                results.append({"action": action.name, "result": result})
+                res.append({"a": a.n, "r": a.h({**self.C, **(ctx or {})})})
             except Exception as e:
-                results.append({"action": action.name, "error": str(e)})
-        return results
+                res.append({"a": a.n, "e": str(e)})
+        return res
 
-    def learn_pattern(self, pattern: str, context: str):
-        if context not in self.learned_patterns:
-            self.learned_patterns[context] = []
-        if pattern not in self.learned_patterns[context]:
-            self.learned_patterns[context].append(pattern)
+    def learn(self, pat: str, ctx: str):
+        self.L.setdefault(ctx, []).append(pat)
 
-    def get_learned_patterns(self, context: str = None) -> Dict:
-        if context:
-            return {context: self.learned_patterns.get(context, [])}
-        return self.learned_patterns
+    def set_ctx(self, k: str, v: Any):
+        self.C[k] = v
 
-    def set_context(self, key: str, value: Any):
-        self.context[key] = value
+    def en(self, n: str):
+        if n in self.A:
+            self.A[n].p = AP.HIGH
 
-    def get_context(self, key: str = None) -> Any:
-        if key:
-            return self.context.get(key)
-        return self.context
+    def dis(self, n: str):
+        if n in self.A:
+            self.A[n].p = AP.LOW
 
-    def enable_action(self, name: str):
-        if name in self.actions:
-            self.actions[name].enabled = True
+    def list_act(self) -> List[Dict]:
+        return [{"n": a.n, "d": a.d, "p": a.p.name} for a in self.A.values()]
 
-    def disable_action(self, name: str):
-        if name in self.actions:
-            self.actions[name].enabled = False
+    def start_mon(self, cb: Callable):
+        self._m = True
 
-    def list_actions(self) -> List[Dict]:
-        return [
-            {
-                "name": a.name,
-                "description": a.description,
-                "priority": a.priority.name,
-                "enabled": a.enabled,
-            }
-            for a in self.actions.values()
-        ]
-
-    def start_monitoring(self, callback: Callable):
-        self._monitoring = True
-
-        def monitor():
-            while self._monitoring:
-                actions = self.analyze_input("")
-                if actions:
-                    callback(actions)
+        def m():
+            while self._m:
+                acts = self.analyze("")
+                if acts:
+                    cb(acts)
                 time.sleep(1)
 
-        self._monitor_thread = threading.Thread(target=monitor, daemon=True)
-        self._monitor_thread.start()
+        self._mt = threading.Thread(target=m, daemon=True)
+        self._mt.start()
 
-    def stop_monitoring(self):
-        self._monitoring = False
-
-
-proactive_engine = ProactiveEngine()
+    def stop_mon(self):
+        self._m = False
 
 
-@proactive_engine.trigger("auto_save", "Auto-save important data", ActionPriority.HIGH)
-def auto_save(context: Dict) -> str:
+pe = PE()
+
+
+@pe.trig("auto_save", "Auto-save", AP.HIGH)
+def auto_save(c):
     return "Auto-save triggered"
 
 
-@proactive_engine.trigger(
-    "suggest_improvements", "Suggest improvements proactively", ActionPriority.NORMAL
-)
-def suggest_improvements(context: Dict) -> str:
+@pe.trig("suggest_improvements", "Suggest", AP.NORMAL)
+def suggest_improvements(c):
     return "Suggestions ready"
 
 
-def trigger_action(action_name: str, **context) -> Any:
-    if action_name in proactive_engine.actions:
-        action = proactive_engine.actions[action_name]
-        return action.handler(context)
-    return None
-
-
-def analyze_and_act(text: str, context: Dict = None) -> List[Dict]:
-    actions = proactive_engine.analyze_input(text)
-    return proactive_engine.execute_actions(actions, context)
-
-
-def learn_user_behavior(input_text: str, action_taken: str):
-    proactive_engine.learn_pattern(input_text, "user_inputs")
-    proactive_engine.learn_pattern(action_taken, "actions_taken")
-
-
-def set_user_context(**kwargs):
-    for k, v in kwargs.items():
-        proactive_engine.set_context(k, v)
+trigger_action = lambda n, **c: pe.A.get(n).h(c) if n in pe.A else None
+analyze_and_act = lambda t, c=None: pe.exec_act(pe.analyze(t), c)
+learn_user_behavior = lambda i, a: (pe.learn(i, "u"), pe.learn(a, "a"))
+set_user_context = lambda **kw: [pe.set_ctx(k, v) for k, v in kw.items()]
