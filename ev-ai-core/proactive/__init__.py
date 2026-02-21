@@ -109,7 +109,10 @@ class PE:
             self.A[n].p = AP.LOW
 
     def list_act(self) -> List[Dict]:
-        return [{"n": a.n, "d": a.d, "p": a.p.name} for a in self.A.values()]
+        return [
+            {"n": a.n, "d": a.d, "p": a.p if isinstance(a.p, str) else str(a.p)}
+            for a in self.A.values()
+        ]
 
     def start_mon(self, cb: Callable):
         self._m = True
