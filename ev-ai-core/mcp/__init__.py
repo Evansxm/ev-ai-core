@@ -1,8 +1,7 @@
-# v2026-02-efficient-r1 - MCP protocol
+# v2026-02 - Advanced MCP capabilities
 import json, asyncio, aiohttp, ssl, certifi
 from typing import Any, Callable, Dict, List, Optional
 from enum import Enum
-from abc import ABC, abstractmethod
 
 
 class PT(Enum):
@@ -31,17 +30,13 @@ class MCPBase:
 
         return dec
 
-    def _tool(self, n: str, d: str, s: Dict, f):
-        self.tools[n] = {"n": n, "d": d, "s": s, "f": f}
-        return f
-
-    def _res(self, u: str, n: str, d: str, m="text/plain"):
+    def resource(self, u: str, n: str, d: str, m: str = "text/plain"):
         self.res[u] = {"u": u, "n": n, "d": d, "m": m}
         return lambda x: x
 
-    def _prompt(self, n: str, d: str, a, f):
+    def prompt(self, n: str, d: str, a: Dict = None):
         self.prompts[n] = {"n": n, "d": d, "a": a or {}}
-        return f
+        return lambda x: x
 
     def caps(self):
         return {
@@ -67,9 +62,6 @@ class MCPServer(MCPBase):
     def __init__(self, n: str):
         super().__init__(n, PT.STDIO)
 
-    async def init(self):
-        pass
-
     async def handle(self, m: str, params: Dict) -> Dict:
         if m == "initialize":
             return {
@@ -77,17 +69,27 @@ class MCPServer(MCPBase):
                 "capabilities": self.caps(),
                 "serverInfo": {"name": self.n, "version": "1.0.0"},
             }
+
         if m == "tools/list":
             return {"tools": self.tools_list()}
+
         if m == "tools/call":
             t, a = params.get("name"), params.get("arguments", {})
             if t in self.tools:
                 r = await self.tools[t]["f"](**a)
                 return {"content": [{"type": "text", "text": str(r)}]}
+
         if m == "resources/list":
             return {"resources": self.res_list()}
+
         if m == "prompts/list":
             return {"prompts": self.prompts_list()}
+
+        if m == "resources/read":
+            uri = params.get("uri", "")
+            if uri in self.res:
+                return {"contents": [{"uri": uri, "text": "Resource content"}]}
+
         return {"error": "Unknown method"}
 
 
@@ -118,7 +120,7 @@ class MCPClient(MCPBase):
         async with self.sess.get(f"{self.url}/tools", ssl=self._ssl) as r:
             return await r.json()
 
-    async def get_res(self, u: str) -> Any:
+    async def get_resource(self, u: str) -> Any:
         if not self.sess:
             await self.init()
         async with self.sess.get(f"{self.url}/resources/{u}", ssl=self._ssl) as r:
