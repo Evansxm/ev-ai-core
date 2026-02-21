@@ -34,16 +34,33 @@ class HTTPServer:
         return dec
 
     def _make_handler(self):
+        import asyncio
+
         class H(http.server.BaseHTTPRequestHandler):
+            server_instance = self  # Store reference to our server
+
             def do_method(m):
                 def h(self):
                     p = self.path.split("?")[0]
-                    if p in self.server.routes and m in self.server.routes[p]:
+                    if (
+                        p in self.server_instance.routes
+                        and m in self.server_instance.routes[p]
+                    ):
                         try:
-                            h = self.server.routes[p][m]
+                            handler = self.server_instance.routes[p][m]
                             l = int(self.headers.get("Content-Length", 0))
                             b = self.rfile.read(l).decode() if l else None
-                            r = h(b)
+
+                            # Handle async handlers
+                            if asyncio.iscoroutinefunction(handler):
+                                loop = asyncio.new_event_loop()
+                                try:
+                                    r = loop.run_until_complete(handler(b))
+                                finally:
+                                    loop.close()
+                            else:
+                                r = handler(b)
+
                             self.send_response(200)
                             self.send_header("Content-Type", "application/json")
                             self.end_headers()
@@ -67,7 +84,6 @@ class HTTPServer:
             def log_message(self, *a):
                 pass
 
-        H.server = self
         return H
 
     def start(self, block=True):

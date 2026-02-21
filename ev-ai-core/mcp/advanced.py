@@ -190,6 +190,8 @@ async def http_request(
     json_data: Dict = None,
 ) -> str:
     """Advanced HTTP request"""
+    import json
+
     try:
         req = urllib.request.Request(url, method=method)
 
