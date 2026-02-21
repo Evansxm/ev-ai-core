@@ -431,6 +431,315 @@ def system_info_full():
     )
 
 
+# DevOps / Cloud
+@_skill("kubectl get pods", "K8s pods", "k8s")
+def k8s_pods(ns="default"):
+    return _r(f"kubectl get pods -n {ns}")
+
+
+@_skill("kubectl apply", "K8s apply", "k8s")
+def k8s_apply(f):
+    return _r(f"kubectl apply -f {f}")
+
+
+@_skill("kubectl logs", "K8s logs", "k8s")
+def k8s_logs(pod, ns="default", lines=100):
+    return _r(f"kubectl logs {pod} -n {ns} --tail {lines}")
+
+
+@_skill("kubectl describe", "K8s describe", "k8s")
+def k8s_describe(resource, name, ns="default"):
+    return _r(f"kubectl describe {resource} {name} -n {ns}")
+
+
+@_skill("helm install", "Helm install", "k8s")
+def helm_install(release, chart, ns="default"):
+    return _r(f"helm install {release} {chart} -n {ns}")
+
+
+@_skill("helm list", "Helm list", "k8s")
+def helm_list(ns="default"):
+    return _r(f"helm list -n {ns}")
+
+
+@_skill("terraform init", "Terraform init", "infra")
+def terraform_init():
+    return _r("terraform init")
+
+
+@_skill("terraform plan", "Terraform plan", "infra")
+def terraform_plan(var_file=None):
+    cmd = "terraform plan"
+    if var_file:
+        cmd += f" -var-file={var_file}"
+    return _r(cmd)
+
+
+@_skill("terraform destroy", "Terraform destroy", "infra")
+def terraform_destroy(var_file=None):
+    cmd = "terraform destroy -auto-approve"
+    if var_file:
+        cmd += f" -var-file={var_file}"
+    return _r(cmd)
+
+
+@_skill("ansible run", "Run Ansible", "infra")
+def ansible_run(playbook, limit=None, tags=None):
+    cmd = f"ansible-playbook {playbook}"
+    if limit:
+        cmd += f" --limit {limit}"
+    if tags:
+        cmd += f" --tags {tags}"
+    return _r(cmd)
+
+
+@_skill("aws ec2 list", "AWS EC2 list", "cloud")
+def aws_ec2_list():
+    return _r(
+        "aws ec2 describe-instances --query 'Reservations[].Instances[].InstanceId'"
+    )
+
+
+@_skill("aws s3 ls", "AWS S3 list", "cloud")
+def aws_s3_list(bucket):
+    return _r(f"aws s3 ls s3://{bucket}")
+
+
+@_skill("aws lambda invoke", "AWS Lambda invoke", "cloud")
+def aws_lambda_invoke(function):
+    return _r(f"aws lambda invoke --function-name {function} /dev/null")
+
+
+@_skill("gcloud list", "GCP list resources", "cloud")
+def gcloud_list(resource="instances", zone="us-central1-a"):
+    return _r(f"gcloud compute {resource} list --zone {zone}")
+
+
+@_skill("docker-compose up", "Docker Compose up", "docker")
+def docker_compose_up(d="."):
+    return _r(f"docker-compose up -d")
+
+
+@_skill("docker-compose down", "Docker Compose down", "docker")
+def docker_compose_down(d="."):
+    return _r(f"docker-compose down")
+
+
+@_skill("docker build", "Docker build", "docker")
+def docker_build(tag, path="."):
+    return _r(f"docker build -t {tag} {path}")
+
+
+@_skill("docker push", "Docker push", "docker")
+def docker_push(tag):
+    return _r(f"docker push {tag}")
+
+
+# Security
+@_skill("nmap scan", "Nmap scan", "security")
+def nmap_scan(target, ports="1-1000", os_detect=False):
+    cmd = f"nmap -sV -p {ports}"
+    if os_detect:
+        cmd += " -O"
+    cmd += f" {target}"
+    return _r(cmd)
+
+
+@_skill("nikto scan", "Nikto scan", "security")
+def nikto_scan(target):
+    return _r(f"nikto -h {target}")
+
+
+@_skill("sqlmap scan", "SQLMap scan", "security")
+def sqlmap_scan(url):
+    return _r(f"sqlmap -u {url} --batch")
+
+
+# Monitoring
+@_skill("top processes", "Top processes", "monitor")
+def top_processes(n=10):
+    return _r(f"ps aux --sort=-%cpu | head -{n}")
+
+
+@_skill("memory usage", "Memory usage", "monitor")
+def memory_usage():
+    return _r("free -h && vmstat 1 3")
+
+
+@_skill("disk io", "Disk I/O", "monitor")
+def disk_io():
+    return _r("iostat -x 1 3")
+
+
+@_skill("network stats", "Network stats", "monitor")
+def network_stats():
+    return _r("netstat -s && ss -s")
+
+
+@_skill("tail logs", "Tail logs", "monitor")
+def tail_logs(path, lines=50):
+    return _r(f"tail -{lines} {path}")
+
+
+@_skill("grep logs", "Grep logs", "monitor")
+def grep_logs(pattern, path="/var/log/*.log"):
+    return _r(f"grep -r '{pattern}' {path} | head -50")
+
+
+# Database
+@_skill("mysql query", "MySQL query", "db")
+def mysql_query(query, db="mysql"):
+    return _r(f"mysql -e '{query}' {db}")
+
+
+@_skill("postgres query", "PostgreSQL query", "db")
+def postgres_query(query, db="postgres"):
+    return _r(f"psql -c '{query}' {db}")
+
+
+@_skill("redis keys", "Redis keys", "db")
+def redis_keys(pattern="*"):
+    return _r(f"redis-cli KEYS '{pattern}'")
+
+
+@_skill("mongo find", "MongoDB find", "db")
+def mongo_find(collection, db="test", query="{}"):
+    return _r(f"mongo {db} --quiet --eval 'db.{collection}.find({query}).pretty()'")
+
+
+# Text Processing
+@_skill("json format", "Format JSON", "text")
+def json_format(file):
+    return _r(f"python3 -m json.tool {file}")
+
+
+@_skill("yaml to json", "YAML to JSON", "text")
+def yaml_to_json(file):
+    return _r(
+        f"python3 -c 'import json,yaml; print(json.dumps(yaml.safe_load(open(\"{file}\"))))'"
+    )
+
+
+@_skill("csv to json", "CSV to JSON", "text")
+def csv_to_json(file):
+    return _r(
+        f"python3 -c 'import csv,json; print(json.dumps(list(csv.DictReader(open(\"{file}\")))))'"
+    )
+
+
+@_skill("sort lines", "Sort lines", "text")
+def sort_lines(file, unique=False):
+    cmd = f"sort {file}"
+    if unique:
+        cmd += " | uniq"
+    return _r(cmd)
+
+
+# Network
+@_skill("curl headers", "Get HTTP headers", "net")
+def curl_headers(url):
+    return _r(f"curl -I {url}")
+
+
+@_skill("curl json", "Get JSON", "net")
+def curl_json(url):
+    return _r(f"curl -s {url} | python3 -m json.tool")
+
+
+@_skill("wget download", "Wget download", "net")
+def wget_download(url, out="/tmp"):
+    return _r(f"wget -P {out} {url}")
+
+
+@_skill("ssh copy id", "SSH copy key", "net")
+def ssh_copy_id(user, host):
+    return _r(f"ssh-copy-id {user}@{host}")
+
+
+# File Management
+@_skill("find by name", "Find by name", "file")
+def find_by_name(pattern, path="."):
+    return _r(f"find {path} -name '{pattern}'")
+
+
+@_skill("find by size", "Find by size", "file")
+def find_by_size(size="+100M", path="."):
+    return _r(f"find {path} -size {size}")
+
+
+@_skill("find by time", "Find by time", "file")
+def find_by_time(days=7, path="."):
+    return _r(f"find {path} -mtime -{days}")
+
+
+@_skill("chmod recursive", "Chmod recursive", "file")
+def chmod_recursive(mode, path="."):
+    return _r(f"chmod -R {mode} {path}")
+
+
+@_skill("chown recursive", "Chown recursive", "file")
+def chown_recursive(user, path="."):
+    return _r(f"chown -R {user} {path}")
+
+
+@_skill("rsync copy", "Rsync copy", "file")
+def rsync_copy(src, dest, archive=True):
+    cmd = "rsync -avz" if archive else "rsync -vz"
+    return _r(f"{cmd} {src} {dest}")
+
+
+# System
+@_skill("check ports", "Check listening ports", "sys")
+def check_ports():
+    return _r("ss -tulpn")
+
+
+@_skill("user list", "List users", "sys")
+def user_list():
+    return _r("cat /etc/passwd | cut -d: -1")
+
+
+@_skill("service status", "Service status", "sys")
+def service_status(name):
+    return _r(f"systemctl status {name} || service {name} status")
+
+
+@_skill("restart service", "Restart service", "sys")
+def restart_service(name):
+    return _r(f"sudo systemctl restart {name} && sudo systemctl status {name}")
+
+
+@_skill("reload daemon", "Reload systemd", "sys")
+def reload_daemon():
+    return _r("sudo systemctl daemon-reload")
+
+
+@_skill("fail2ban status", "Fail2ban status", "security")
+def fail2ban_status():
+    return _r("sudo fail2ban-client status")
+
+
+@_skill("ufw status", "UFW firewall status", "security")
+def ufw_status():
+    return _r("sudo ufw status numbered")
+
+
+@_skill("iptables list", "IPTables rules", "security")
+def iptables_list():
+    return _r("sudo iptables -L -n -v")
+
+
+# Containers
+@_skill("podman ps", "Podman containers", "container")
+def podman_ps():
+    return _r("podman ps -a")
+
+
+@_skill("crictl pods", "CRI-O pods", "container")
+def crictl_pods():
+    return _r("crictl pods")
+
+
 def get_skill(n: str) -> Optional[Skill]:
     return R.get(n)
 
